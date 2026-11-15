@@ -91,3 +91,7 @@ repro/
 third_party/webui/
 # FFmpeg and dav1d release archives fetched by scripts/fetch-media-sources.sh.
 third_party/media-sources/
+
+# Local portable companion outputs
+portable/build-*/
+portable/**/__pycache__/

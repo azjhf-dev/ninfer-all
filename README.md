@@ -1,5 +1,10 @@
 # NInfer-all
 
+> **6900HX / 680M fork:** See [portable/README.md](portable/README.md) for the separate,
+> pinned llama.cpp GGUF CPU/Vulkan companion. CPU inference was smoke-tested on Linux x86_64;
+> the 680M Vulkan path is unvalidated. Native NInfer below remains NVIDIA/CUDA-only.
+> This fork is not a native NInfer AMD backend and does not run `.ninfer` on AMD.
+
 A C++/CUDA inference engine for the Qwen3.5 model family (Qwen3.6 and Qwen3.8 27B, Qwen3.6-35B-A3B,
 their fine-tunes and Ternary Bonsai 2), Qwen3.8-Flash-Next and Edge0's latent-MoE models built on it,
 Gemma 4 26B-A4B, Recursive's Flint and DeepSeek-V4.1-Flash, on NVIDIA GPUs from Volta to consumer Blackwell, from 8 GB of memory. It serves the OpenAI, Anthropic
