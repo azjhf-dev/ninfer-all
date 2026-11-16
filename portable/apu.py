@@ -38,14 +38,29 @@ def binary(backend, name):
     raise ValueError("Binary missing; first run: python portable/apu.py build --backend " + backend)
 
 
+BMOE_BACKENDS = ("bmoe-cpu", "bmoe-vulkan")
+
+
+def is_bmoe(backend):
+    return backend in BMOE_BACKENDS
+
+
 def command(args):
     if args.action == "build":
+        if is_bmoe(args.backend):
+            return [["cmake", "-S", str(ROOT / "bmoe"), "-B", str(build_dir(args.backend)),
+                     "-DCMAKE_BUILD_TYPE=Release", "-DNINFER_PORTABLE_BMOE_VULKAN=" +
+                     ("ON" if args.backend == "bmoe-vulkan" else "OFF")],
+                    ["cmake", "--build", str(build_dir(args.backend)), "--config", "Release",
+                     "--target", "bmoe-cli", "bmoe-server", "--parallel", str(args.jobs)]]
         return [["cmake", "-S", str(ROOT), "-B", str(build_dir(args.backend)),
                  "-DCMAKE_BUILD_TYPE=Release", "-DNINFER_PORTABLE_VULKAN=" +
                  ("ON" if args.backend == "vulkan" else "OFF")],
                 ["cmake", "--build", str(build_dir(args.backend)), "--config", "Release",
                  "--target", "llama-completion", "llama-server", "llama-bench",
                  "--parallel", str(args.jobs)]]
+    if is_bmoe(args.backend):
+        return bmoe_command(args)
     if args.action == "devices":
         return [[binary(args.backend, "llama-completion"), "--list-devices"]]
     model = Path(args.model).expanduser().resolve()
@@ -70,13 +85,35 @@ def command(args):
     return [result + device]
 
 
+def bmoe_command(args):
+    """BigMoeOnEdge engine commands. Its --auto planner measures the machine and
+    decides threads, devices and offload itself; the launcher does not reimplement
+    that policy and rejects manual offload flags for these backends."""
+    if args.action == "devices":
+        raise ValueError("bmoe-cli has no --list-devices; run `build` then `run` and read the plan --auto prints")
+    if args.action == "bench":
+        raise ValueError("No bmoe bench preset here; `run` prints measured rates. Compare engines on the same model.")
+    if args.gpu_layers != 0:
+        raise ValueError("BigMoeOnEdge plans device offload itself via --auto; manual --gpu-layers is not supported")
+    model = Path(args.model).expanduser().resolve()
+    if not model.is_file() or model.suffix.lower() != ".gguf":
+        raise ValueError("Supply an existing local .gguf file. Native .ninfer files are not supported.")
+    if args.action == "serve":
+        # Loopback only. The web UI is not built by this companion; use the HTTP API.
+        return [[binary(args.backend, "bmoe-server"), "--host", "127.0.0.1", "--port", str(args.port),
+                 "--no-api-key", "--models-dir", str(model.parent)]]
+    return [[binary(args.backend, "bmoe-cli"), "-m", str(model), "--auto",
+             "--ctx-size", str(args.context), "--threads", str(args.threads),
+             "-p", args.prompt, "--n-predict", str(args.tokens)]]
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
     doctor = sub.add_parser("doctor", help="Print local tool availability without changing the host")
     for action in ("build", "run", "serve", "bench", "devices"):
         p = sub.add_parser(action)
-        p.add_argument("--backend", choices=("cpu", "vulkan"), default="cpu")
+        p.add_argument("--backend", choices=("cpu", "vulkan") + BMOE_BACKENDS, default="cpu")
         p.add_argument("--dry-run", action="store_true")
         if action == "build":
             p.add_argument("--jobs", type=positive, default=2)

@@ -68,3 +68,46 @@ class Commands(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BmoeCommands(unittest.TestCase):
+    def test_bmoe_build_profiles_are_separate(self):
+        for backend, enabled in (("bmoe-cpu", "OFF"), ("bmoe-vulkan", "ON")):
+            args = argparse.Namespace(action="build", backend=backend, jobs=2)
+            commands = apu.command(args)
+            self.assertIn("-DNINFER_PORTABLE_BMOE_VULKAN=" + enabled, commands[0])
+            self.assertIn(str(apu.ROOT / ("build-" + backend)), commands[0])
+            self.assertIn(str(apu.ROOT / "bmoe"), commands[0])
+            self.assertIn("bmoe-cli", commands[1])
+
+    def test_bmoe_run_uses_auto_planner(self):
+        with tempfile.TemporaryDirectory() as folder:
+            model = Path(folder) / "model.gguf"
+            model.touch()
+            args = argparse.Namespace(action="run", backend="bmoe-cpu", model=str(model),
+                                      threads=8, gpu_layers=0, context=2048, device=None,
+                                      prompt="literal $HOME ; echo bad", tokens=4, port=8080)
+            with patch.object(apu, "binary", return_value="bmoe-cli"):
+                cmd = apu.command(args)[0]
+                self.assertIn("--auto", cmd)
+                self.assertEqual(cmd[cmd.index("-p") + 1], args.prompt)
+                self.assertEqual(cmd[cmd.index("--n-predict") + 1], "4")
+                args.gpu_layers = 1
+                with self.assertRaisesRegex(ValueError, "--auto"):
+                    apu.command(args)
+
+    def test_bmoe_server_loopback_and_devices_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            model = Path(folder) / "model.gguf"
+            model.touch()
+            base = argparse.Namespace(model=str(model), threads=8, gpu_layers=0,
+                                      context=2048, device=None, port=8080,
+                                      prompt="hi", tokens=4)
+            with patch.object(apu, "binary", return_value="bmoe-server"):
+                args = argparse.Namespace(**vars(base), action="serve", backend="bmoe-vulkan")
+                cmd = apu.command(args)[0]
+                self.assertEqual(cmd[cmd.index("--host") + 1], "127.0.0.1")
+                self.assertIn("--no-api-key", cmd)
+            args = argparse.Namespace(**vars(base), action="devices", backend="bmoe-cpu")
+            with self.assertRaisesRegex(ValueError, "--list-devices"):
+                apu.command(args)

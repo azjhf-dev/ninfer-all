@@ -24,6 +24,25 @@ Test host: Linux x86_64, GCC 11.4.0, CMake 3.31, Python 3.10. This is **not** th
 - The linked 27B condensed GGUF was not downloaded or loaded. Other GGUF families, quantizations, multilingual quality, long context, chat templates, vision and concurrent requests were not qualified.
 - Native NInfer was not compiled: CUDA is not present, and it still requires NVIDIA hardware. No CPU-only native executor, AMD kernel port, `.ninfer` support or rk8v4 cache has been implemented by this branch.
 
+## BigMoeOnEdge engine (added 2026-11-16)
+
+Test host as above (Linux x86_64, not the user's APU). BigMoeOnEdge 0.43.1 at `600dc2966467b035c4d5de09c839985b2dc5c286`, llama.cpp submodule at `ac3098770cde1d495befaa7d1066076652190aa2`.
+
+### Passed
+
+1. Full upstream build (CLI, server, all 34 test binaries) from a git checkout of the pinned commits with GGML_NATIVE ON, desktop OFF. `bmoe-cli --version` reports `0.43.1`.
+2. 32 of 34 upstream test binaries pass. `bmoe_startup_pin_fit_test` fails on this host (environment/privilege dependent, exits 2 with no output); `bmoe_output_constraint_session_test` needs a real MoE GGUF and its streamed/dense comparison fails on the dense tiny model (expected: it refuses to stream a non-MoE file).
+3. `bmoe-cli --auto --plan` on the tiny dense GGUF runs the full pipeline: IO probes, device probe, placement and rules stages; correctly reports "regime not-moe" and declines expert streaming for a dense model.
+4. Clean `portable/bmoe` FetchContent build of `bmoe-cli` and `bmoe-server` passes end to end: immutable archive downloads, SHA-256 validation for both the engine and its pinned llama.cpp, and one documented configure-time patch that rewrites upstream's `${CMAKE_SOURCE_DIR}/third_party/` paths so the engine builds as a subproject. `--version` and `--auto --plan` verified on these exact binaries too.
+5. Eight launcher unit tests pass (existing five plus bmoe build-dir separation, --auto run construction, loopback serve and devices rejection).
+
+### Not passed / not attempted
+
+- Real MoE GGUF generation not tested: no MoE model on the test host. Dense tiny-GGUF generation fails at context creation: the pinned llama.cpp defaults to q8_0 KV cache, which does not divide this model's n_embd_head_k=8. Not assessed for real MoE models.
+- bmoe-vulkan not configured or built (no Vulkan SDK on the test host). No 680M/HIP claim.
+- bmoe-server starts a loopback HTTP service per its flags; the web UI is not built (needs npm) and no end-to-end server request was run here.
+- No run on Ryzen 6900HX / Radeon 680M. Upstream's published benchmark numbers are on NVIDIA and Apple hardware and are not reproduced or endorsed here.
+
 ## Repeat the local checks
 
 ```sh
@@ -32,6 +51,8 @@ python portable/apu.py build --backend cpu
 python portable/apu.py run --model /path/to/tiny-model.gguf --threads 2 --context 512 --tokens 12 --prompt "Once upon a time"
 python portable/apu.py bench --model /path/to/tiny-model.gguf --threads 2
 python portable/apu.py serve --model /path/to/tiny-model.gguf --threads 2 --context 512
+python portable/apu.py build --backend bmoe-cpu
+python portable/apu.py run --backend bmoe-cpu --model /path/to/moe-model.gguf --prompt "Hello" --tokens 64
 ```
 
 Use the same model, settings and power state for target-hardware comparisons. Preserve error logs and note driver versions before changing settings. Build and model caches are ignored by Git; no model weights or binaries are committed.

@@ -2,13 +2,14 @@
 
 ## What this branch delivers
 
-A real fork preserving NInfer upstream, plus a **separate llama.cpp GGUF build and launcher** for CPU and opt-in Vulkan. This is **not a native AMD port of NInfer**. The original root build remains CUDA-only. Nothing in `src/`, `kernel/`, or the upstream model executor has been replaced.
+A real fork preserving NInfer upstream, plus **two separate portable engines** for CPU and opt-in Vulkan: a plain llama.cpp GGUF build and the BigMoeOnEdge MoE-streaming engine. This is **not a native AMD port of NInfer**. The original root build remains CUDA-only. Nothing in `src/`, `kernel/`, or the upstream model executor has been replaced.
 
 - Upstream base: `iamwavecut/ninfer-all` at `40d913db2e87e2211fce4089c0c7920480a5e7a0`.
 - History branch: `build/ryzen-6900hx-680m-40d913d`. `master` retains the upstream snapshot.
 - Portable backend: `ggml-org/llama.cpp` at `900f01ba09ac5735e16a634a2c37e000639c936a`, downloaded by immutable commit with SHA-256 verification. Apache-2.0 NInfer and MIT llama.cpp retain their own licenses.
 - CPU profile: AVX2, FMA, F16C; native-host auto-tuning and AVX-512 disabled. No CUDA/ROCm dependency.
 - 680M route: llama.cpp Vulkan, **experimental and not built or tested on a 680M here**. No claimed HIP support.
+- MoE engine: `Helldez/BigMoeOnEdge` 0.43.1 at `600dc2966467b035c4d5de09c839985b2dc5c286` with its pinned `Helldez/llama.cpp` at `ac3098770cde1d495befaa7d1066076652190aa2`, both downloaded by immutable archive with SHA-256 verification (Apache-2.0 / MIT licenses kept). One configure-time patch rewrites upstream's top-level `${CMAKE_SOURCE_DIR}` third_party paths so it builds as a subproject; no engine code is changed.
 - Runtime defaults: 8 CPU threads, 2,048 context, batch 256 / microbatch 128, **zero GPU layers in both modes** until explicitly changed. These are safe starting points, not measured optimum settings.
 
 ## Build (Linux or Windows)
@@ -56,6 +57,19 @@ Replace `Vulkan0` above with the exact device ID shown for your **680M**. Vulkan
 
 The iGPU shares system RAM and bandwidth with the CPU. A larger BIOS framebuffer is not extra memory. A roughly 12.5 GB 27B quant needs additional memory for the OS, model buffers, context and GPU allocations. Total RAM, dual-channel bandwidth, drivers and power limits are unknown. No claim that the linked 27B model fits or is fast on this laptop, and no 75K context / 60 tok/s promise from the NVIDIA post transfers here. Vulkan can be slower than CPU on an APU: measure both.
 
+## BigMoeOnEdge engine (MoE models)
+
+For MoE GGUF models (Qwen3.x-35B-A3B, Qwen3.8-Flash-Next, etc.), BigMoeOnEdge streams experts from flash so models larger than RAM run at usable speed, and its `--auto` planner measures the machine and picks threads/devices itself. This is a third engine in the companion, separate from both native NInfer and the plain llama.cpp build.
+
+```sh
+python portable/apu.py build --backend bmoe-cpu --jobs 2
+python portable/apu.py run --backend bmoe-cpu --model /path/to/moe-model.gguf --prompt "Hello" --tokens 64
+python portable/apu.py serve --backend bmoe-cpu --model /path/to/moe-model.gguf
+python portable/apu.py build --backend bmoe-vulkan   # opt-in 680M trial, needs the Vulkan SDK/drivers
+```
+
+`--gpu-layers` and `devices` are rejected for the bmoe backends on purpose: `--auto` does device/offload planning and prints its plan and reasons. `serve` binds loopback with no API key; the desktop web UI is not built by this companion (needs npm), so use the HTTP API. Upstream validation claims are theirs, not ours: nothing here was run on a real 6900HX/680M, and no real MoE GGUF was loaded in our tests (a tiny dense GGUF fails context creation on a KV-cache quirk; see VALIDATION.md). Benchmark claims from the thread (35 tok/s on an 8 GB card with Qwen3.6-35B etc.) are the author's, on NVIDIA/Apple hardware, not measured here.
+
 ## Formats and feature boundaries
 
 | Feature | Portable companion |
@@ -66,6 +80,9 @@ The iGPU shares system RAM and bandwidth with the CPU. A larger BIOS framebuffer
 | NInfer CUDA/PTX kernels | Not ported |
 | NInfer rk8v4 cache / MTP / DFlash2 / route profiles | Not inherited by this companion |
 | Native NInfer CPU-only model execution | Not implemented |
+| BigMoeOnEdge engine (bmoe-cpu) | Compiles from pinned sources; `--version` and `--auto --plan` verified; 32/34 upstream unit tests pass |
+| BigMoeOnEdge real MoE inference | Not tested here (no MoE GGUF on the test host); upstream benchmark claims not reproduced |
+| BigMoeOnEdge Vulkan (680M) | Build option supplied; not configured, built or run here |
 | 680M Vulkan | Build option and launcher supplied; validation pending on suitable driver/toolchain/hardware |
 | HIP/ROCm on gfx1035 | Not implemented or claimed |
 
@@ -80,6 +97,8 @@ See [VALIDATION.md](VALIDATION.md) for exactly what was tested. Keep native AMD 
 ## Sources
 
 - https://github.com/iamwavecut/ninfer-all (inspected source checkout, exact base above)
+- https://github.com/Helldez/BigMoeOnEdge (inspected source checkout, exact base above; also forked to https://github.com/azjhf-dev/BigMoeOnEdge)
+- https://www.reddit.com/r/LocalLLaMA/comments/1xx5fng/ (the thread this work came from; benchmark claims are the author's)
 - https://github.com/ggml-org/llama.cpp (inspected pinned checkout, including Vulkan CMake and model architecture registry)
 - https://huggingface.co/fakezeta/Qwen3.8-27B-UD-Q3_K_XL-Condensed-P2 (model author's format and vocabulary claims)
 - https://huggingface.co/ggml-org/models (tiny test model repository)
